@@ -23,9 +23,16 @@
 """
 
 import os
+import configparser
+import requests
+import json
 
 from qgis.PyQt import QtGui, QtWidgets, uic
 from qgis.PyQt.QtCore import pyqtSignal
+from PyQt5.QtWidgets import QMessageBox
+from qgis.core import QgsGeometry, QgsVectorLayer, QgsProject, QgsFeature, QgsField
+from qgis.core import QgsProject, QgsCoordinateTransform, QgsCoordinateReferenceSystem
+from qgis.utils import iface
 
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
     os.path.dirname(__file__), 'marvin_dockwidget_base.ui'))
@@ -45,6 +52,133 @@ class MarvinDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         # #widgets-and-dialogs-with-auto-connect
         self.setupUi(self)
 
+        self.pushButton.clicked.connect(self.on_button_click)
+
+
     def closeEvent(self, event):
         self.closingPlugin.emit()
         event.accept()
+
+
+    def on_button_click(self):
+            plugin_folder = self.get_plugin_folder()
+            server_url = self.read_server_name(plugin_folder + os.sep + "config.ini")
+
+            # Controleer of de QPlainTextEdit leeg is
+            if not self.plainTextEdit.toPlainText():
+                QMessageBox.information(self.pushButton, "Info", "Ask question first")
+            else:
+                q = self.plainTextEdit.toPlainText()
+                json_data = {
+                    "question": q,
+                    "geom": "",
+                    "userLocation": "",
+                    "debug": False
+                }
+                print(json_data)
+                response = self.post_to_server(server_url,json_data)
+                print(response)
+
+                error = response.get('error', '')
+
+                if error == 'NO_GEO_FOCUS_FOUND':
+                    QMessageBox.information(self.pushButton, "Error", "error: No Geofocus found")
+                elif error == "INVALID_SQL_QUERY" or "NO_SQL_RESULT_RETURNED":
+                    print(error)
+                    focus = response.get('focus')
+                    locations = focus.get('locations')
+                    first_loc = locations[0]
+                    name = first_loc.get('name')
+                    print(name)
+                    wkt = first_loc.get('geometry')
+                    print("wkt" + wkt)
+                    self.draw_wkt(wkt)
+                                        
+                else:
+                    data = response.get('data')
+                    geometry = data[0]['geom']
+                    print("geometry: " + geometry)
+                    self.draw_wkt(wkt)
+
+    def read_server_name(self, config_path="config.ini"):
+        """Reads the server name from a config.ini file."""
+        config = configparser.ConfigParser()
+        config.read(config_path)
+
+        # Check if the section and key exist
+        if "Server" in config and "name" in config["Server"]:
+            return config["Server"]["name"]
+        else:
+            print("Error: 'Server' section or 'name' key is missing in config.ini")
+            return None
+
+    def get_plugin_folder(self):
+        plugin_folder = os.path.dirname(os.path.abspath(__file__))
+        return plugin_folder
+    
+
+    def post_to_server(self, server_url, json_data):
+        # Zorg ervoor dat je JSON-data goed is
+        headers = {'Content-Type': 'application/json'}
+
+        # Verstuur de POST request
+        response = requests.post(server_url, data=json.dumps(json_data), headers=headers)
+
+        return json.loads(response.text)
+
+    def draw_wkt(self, wkt):
+        # Convert the WKT to a QgsGeometry object
+        geometry = QgsGeometry.fromWkt(wkt)
+
+        # Controleer of de geometrie geldig is
+        print("Is geldige geometrie:", geometry.isGeosValid())
+
+        # Haal het geometrie-type op
+        print("Geometrie type:", geometry.type())  # 0 = punt, 1 = lijn, 2 = polygoon
+
+        # Haal de WKT-string terug op
+        print("WKT-representatie:", geometry.asWkt())
+
+        # Haal de bounding box (min/max coördinaten) op
+        print("Bounding box:", geometry.boundingBox().toString())
+
+        extent = geometry.boundingBox()
+
+        # Check if the geometry is valid
+        if geometry.isEmpty():
+            print("Invalid geometry!")
+            return
+        
+        # Maak een tijdelijke laag aan
+        layer = QgsVectorLayer("Polygon?crs=EPSG:4326", "WKT Polygoon", "memory")
+
+        # Definieer de attributen
+        layer_provider = layer.dataProvider()
+        # layer_provider.addAttributes([QgsField("id", QVariant.Int)])
+        # layer.updateFields()
+
+        # Maak een feature en voeg de geometrie toe
+        feature = QgsFeature()
+        feature.setGeometry(geometry)
+        feature.setAttributes([1])  # Stel ID in
+
+        # Voeg de feature toe aan de laag
+        layer_provider.addFeature(feature)
+        layer.updateExtents()
+
+        # Voeg de laag toe aan het QGIS-project
+        QgsProject.instance().addMapLayer(layer)
+
+        canvas = iface.mapCanvas()
+
+        crs_source = QgsCoordinateReferenceSystem("EPSG:4326")
+        crs_project = canvas.mapSettings().destinationCrs()
+    
+        # Transformeer de extent naar de projectie van de kaart
+        transform = QgsCoordinateTransform(crs_source, crs_project, QgsProject.instance())
+        transformed_extent = transform.transformBoundingBox(extent)
+
+        canvas.setExtent(transformed_extent)
+        canvas.refresh()
+        
+        print("klaar")
