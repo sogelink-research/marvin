@@ -1,0 +1,27 @@
+name: Deploy ZIP on Release 
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  deploy:
+    name: Upload ZIP to Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare files and create ZIP
+        run: |
+          mkdir -p marvin
+          cp -r clients/qgis/src/* marvin/
+          zip -r qgis_marvin.zip marvin
+
+      - name: Upload ZIP to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: qgis_marvin.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
