@@ -102,6 +102,9 @@ class MarvinDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
 
     def read_server_name(self, config_path="config.ini"):
         """Reads the server name from a config.ini file."""
+        if not os.path.exists(config_path):
+            QMessageBox.information(self.pushButton, "Error", "error: config file " + config_path + " does not exist.")
+            return None
         config = configparser.ConfigParser()
         config.read(config_path)
 
