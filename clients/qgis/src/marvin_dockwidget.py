@@ -30,11 +30,13 @@ import json
 from qgis.PyQt import QtGui, QtWidgets, uic
 from qgis.PyQt.QtCore import pyqtSignal
 from PyQt5.QtWidgets import QMessageBox
-from qgis.core import QgsGeometry, QgsVectorLayer, QgsProject, QgsFeature, QgsField
+from qgis.core import QgsGeometry, QgsVectorLayer, QgsProject, QgsFeature, QgsLineSymbol,QgsSingleSymbolRenderer
 from qgis.core import QgsProject, QgsCoordinateTransform, QgsCoordinateReferenceSystem
 from qgis.utils import iface
 from PyQt5.QtCore import QUrl, QEventLoop
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest
+from qgis.core import QgsWkbTypes
+from PyQt5.QtCore import QVariant
 
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
     os.path.dirname(__file__), 'marvin_dockwidget_base.ui'))
@@ -87,22 +89,24 @@ class MarvinDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
 
                 if error == 'NO_GEO_FOCUS_FOUND':
                     QMessageBox.information(self.pushButton, "Error", "error: No Geofocus found")
-                elif error == "INVALID_SQL_QUERY" or "NO_SQL_RESULT_RETURNED":
-                    print(error)
-                    focus = response.get('focus')
-                    locations = focus.get('locations')
-                    first_loc = locations[0]
-                    name = first_loc.get('name')
-                    print(name)
-                    wkt = first_loc.get('geometry')
-                    print("wkt" + wkt)
-                    self.draw_wkt(wkt)
+                # elif error == "INVALID_SQL_QUERY" or "NO_SQL_RESULT_RETURNED":
                                         
                 else:
                     data = response.get('data')
-                    geometry = data[0]['geom']
-                    print("geometry: " + geometry)
-                    self.draw_wkt(wkt)
+                    if data is not None and len(data) > 0 and data[0] is not None:
+                        wkts = []
+
+                        for d in data:
+                            if 'geom' in d:
+                                wkts.append(d['geom'])
+
+                        if len(wkts)> 0:
+                            self.draw_wkt(wkts)
+                        else:
+                            QMessageBox.information(self.pushButton, "Error", "No geometry found in data")                                
+                    else:
+                        QMessageBox.information(self.pushButton, "Error", "Data not ok")
+
 
     def read_server_name(self, config_path="config.ini"):
         """Reads the server name from a config.ini file."""
@@ -136,33 +140,46 @@ class MarvinDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
 
         return json.loads(reply.readAll().data().decode())  # JSON-antwoord als string
 
-    def draw_wkt(self, wkt):
-        geometry = QgsGeometry.fromWkt(wkt)
-        print("Is geldige geometrie:", geometry.isGeosValid())
-        print("Geometrie type:", geometry.type())  # 0 = punt, 1 = lijn, 2 = polygoon
-        print("WKT-representatie:", geometry.asWkt())
-        print("Bounding box:", geometry.boundingBox().toString())
-
-        extent = geometry.boundingBox()
-
-        if geometry.isEmpty():
-            print("Invalid geometry!")
-            return
-        
-        layer = QgsVectorLayer("Polygon?crs=EPSG:4326", "WKT Polygoon", "memory")
+    def draw_wkt(self, wkts):
+        geom = QgsGeometry.fromWkt(wkts[0])
+        if geom.type() == QgsWkbTypes.PolygonGeometry:
+            layer = QgsVectorLayer("Polygon?crs=EPSG:4326", "WKT Polygoon", "memory")
+        elif geom.type() == QgsWkbTypes.LineGeometry:
+            layer = QgsVectorLayer("LineString?crs=EPSG:4326", "WKT Lijn", "memory")
+            line_symbol = QgsLineSymbol.createSimple({'color': 'red', 'width': '2'})
+            renderer = QgsSingleSymbolRenderer(line_symbol)
+            layer.setRenderer(renderer)
+            print("line symbol aangepast")
+        else:
+            raise ValueError("Unsupported geometry type")
 
         layer_provider = layer.dataProvider()
-        # layer_provider.addAttributes([QgsField("id", QVariant.Int)])
-        # layer.updateFields()
+        
+        for wkt in wkts:
+            geometry = QgsGeometry.fromWkt(wkt)
+            # print("Is geldige geometrie:", geometry.isGeosValid())
+            # print("Geometrie type:", geometry.type())  # 0 = punt, 1 = lijn, 2 = polygoon
+            # print("WKT-representatie:", geometry.asWkt())
+            # print("Bounding box:", geometry.boundingBox().toString())
 
-        # Maak een feature en voeg de geometrie toe
-        feature = QgsFeature()
-        feature.setGeometry(geometry)
-        feature.setAttributes([1])  # Stel ID in
+            if geometry.isEmpty():
+                print("Invalid geometry!")
+                return
+            
+            # layer = QgsVectorLayer("Polygon?crs=EPSG:4326", "WKT Polygoon", "memory")
 
-        layer_provider.addFeature(feature)
+            # Maak een feature en voeg de geometrie toe
+            feature = QgsFeature()
+            # todo add atttibutes
+
+            feature.setGeometry(geometry)
+            layer_provider.addFeature(feature)
+
+
         layer.updateExtents()
 
+        extent = layer.extent() 
+        
         QgsProject.instance().addMapLayer(layer)
 
         canvas = iface.mapCanvas()
