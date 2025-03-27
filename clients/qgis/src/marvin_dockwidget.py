@@ -30,7 +30,7 @@ import json
 from qgis.PyQt import QtGui, QtWidgets, uic
 from qgis.PyQt.QtCore import pyqtSignal
 from PyQt5.QtWidgets import QMessageBox
-from qgis.core import QgsGeometry, QgsVectorLayer, QgsProject, QgsFeature, QgsLineSymbol,QgsSingleSymbolRenderer
+from qgis.core import QgsGeometry, QgsVectorLayer, QgsProject, QgsFeature, QgsLineSymbol,QgsSingleSymbolRenderer,QgsMarkerSymbol
 from qgis.core import QgsProject, QgsCoordinateTransform, QgsCoordinateReferenceSystem
 from qgis.utils import iface
 from PyQt5.QtCore import QUrl, QEventLoop
@@ -57,55 +57,59 @@ class MarvinDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         self.setupUi(self)
 
         self.pushButton.clicked.connect(self.on_button_click)
-
+        self.plainTextEdit.textChanged.connect(self.on_text_change)
 
     def closeEvent(self, event):
         self.closingPlugin.emit()
         event.accept()
 
+    def on_text_change(self):
+        q = self.plainTextEdit.toPlainText()
+        if q.endswith("\n"):
+            self.handlePrompt(q)
 
     def on_button_click(self):
-            plugin_folder = self.get_plugin_folder()
-            server_url = self.read_server_name(plugin_folder + os.sep + "config.ini")
+        q = self.plainTextEdit.toPlainText()
+        self.handlePrompt(q)
 
-            # Controleer of de QPlainTextEdit leeg is
-            if not self.plainTextEdit.toPlainText():
-                QMessageBox.information(self.pushButton, "Info", "Ask question first")
-            else:
-                q = self.plainTextEdit.toPlainText()
-                json_data = {
-                    "question": q,
-                    "geom": "",
-                    "userLocation": "",
-                    "debug": False
-                }
-                print(json_data)
-                # response = self.post_to_server(server_url,json_data)
-                response = self.fetch_data_qt(server_url,json_data)
+    def handlePrompt(self,q):
+        plugin_folder = self.get_plugin_folder()
+        server_url = self.read_server_name(plugin_folder + os.sep + "config.ini")
 
-                print(response)
+        json_data = {
+            "question": q,
+            "geom": "",
+            "userLocation": "",
+            "debug": False
+        }
+        print(json_data)
+        # response = self.post_to_server(server_url,json_data)
+        response = self.fetch_data_qt(server_url,json_data)
 
-                error = response.get('error', '')
+        print(response)
 
-                if error == 'NO_GEO_FOCUS_FOUND':
-                    QMessageBox.information(self.pushButton, "Error", "error: No Geofocus found")
-                # elif error == "INVALID_SQL_QUERY" or "NO_SQL_RESULT_RETURNED":
-                                        
+        error = response.get('error', '')
+
+        if error == 'NO_GEO_FOCUS_FOUND':
+            QMessageBox.information(self.pushButton, "Error", "error: No Geofocus found")
+        # elif error == "INVALID_SQL_QUERY" or "NO_SQL_RESULT_RETURNED":
+                                
+        else:
+            data = response.get('data')
+            if data is not None and len(data) > 0 and data[0] is not None:
+                wkts = []
+
+                for d in data:
+                    if 'geom' in d:
+                        wkts.append(d['geom'])
+
+                if len(wkts)> 0:
+                    self.draw_wkt(wkts)
                 else:
-                    data = response.get('data')
-                    if data is not None and len(data) > 0 and data[0] is not None:
-                        wkts = []
+                    QMessageBox.information(self.pushButton, "Error", "No geometry found in data")                                
+            else:
+                QMessageBox.information(self.pushButton, "Error", "Data not ok")
 
-                        for d in data:
-                            if 'geom' in d:
-                                wkts.append(d['geom'])
-
-                        if len(wkts)> 0:
-                            self.draw_wkt(wkts)
-                        else:
-                            QMessageBox.information(self.pushButton, "Error", "No geometry found in data")                                
-                    else:
-                        QMessageBox.information(self.pushButton, "Error", "Data not ok")
 
 
     def read_server_name(self, config_path="config.ini"):
@@ -150,6 +154,12 @@ class MarvinDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
             renderer = QgsSingleSymbolRenderer(line_symbol)
             layer.setRenderer(renderer)
             print("line symbol aangepast")
+        elif geom.type() == QgsWkbTypes.PointGeometry:
+            layer = QgsVectorLayer("Point?crs=EPSG:4326", "WKT Punt", "memory")
+            point_symbol = QgsMarkerSymbol.createSimple({'color': 'blue', 'size': '3'})
+            renderer = QgsSingleSymbolRenderer(point_symbol)
+            layer.setRenderer(renderer)
+            print("point symbol aangepast")            
         else:
             raise ValueError("Unsupported geometry type")
 
@@ -157,18 +167,11 @@ class MarvinDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         
         for wkt in wkts:
             geometry = QgsGeometry.fromWkt(wkt)
-            # print("Is geldige geometrie:", geometry.isGeosValid())
-            # print("Geometrie type:", geometry.type())  # 0 = punt, 1 = lijn, 2 = polygoon
-            # print("WKT-representatie:", geometry.asWkt())
-            # print("Bounding box:", geometry.boundingBox().toString())
 
             if geometry.isEmpty():
                 print("Invalid geometry!")
                 return
             
-            # layer = QgsVectorLayer("Polygon?crs=EPSG:4326", "WKT Polygoon", "memory")
-
-            # Maak een feature en voeg de geometrie toe
             feature = QgsFeature()
             # todo add atttibutes
 

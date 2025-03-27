@@ -31,8 +31,13 @@
     </item>
     <item row="0" column="0">
      <widget class="QLabel" name="label">
+      <property name="font">
+       <font>
+        <pointsize>12</pointsize>
+       </font>
+      </property>
       <property name="text">
-       <string>Ask a question:</string>
+       <string>What can I help with?</string>
       </property>
      </widget>
     </item>
