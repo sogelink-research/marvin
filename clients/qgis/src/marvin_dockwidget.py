@@ -57,16 +57,10 @@ class MarvinDockWidget(QtWidgets.QDockWidget, FORM_CLASS):
         self.setupUi(self)
 
         self.pushButton.clicked.connect(self.on_button_click)
-        self.plainTextEdit.textChanged.connect(self.on_text_change)
 
     def closeEvent(self, event):
         self.closingPlugin.emit()
         event.accept()
-
-    def on_text_change(self):
-        q = self.plainTextEdit.toPlainText()
-        if q.endswith("\n"):
-            self.handlePrompt(q)
 
     def on_button_click(self):
         q = self.plainTextEdit.toPlainText()
